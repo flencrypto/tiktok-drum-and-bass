@@ -185,10 +185,8 @@ async def upsert_intelligence_entry(
         {**entry_data, "idempotency_key": idempotency_key, "doc_id": doc_id},
     )
     async with AsyncSessionLocal() as session:
-        from sqlalchemy import select as sa_select
-
         result = await session.execute(
-            sa_select(IntelligenceEntryORM).where(
+            select(IntelligenceEntryORM).where(
                 IntelligenceEntryORM.idempotency_key == idempotency_key
             )
         )
@@ -357,6 +355,11 @@ async def social_create_draft(
     if platform.lower() == "tiktok" and settings.tiktok_access_token:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
+                source_info: dict[str, Any] = (
+                    {"source": "PULL_FROM_URL", "video_url": video_url}
+                    if video_url
+                    else {"source": "FILE_UPLOAD"}
+                )
                 resp = await client.post(
                     "https://open.tiktokapis.com/v2/post/publish/video/init/",
                     headers={
@@ -371,10 +374,7 @@ async def social_create_draft(
                             "disable_comment": False,
                             "disable_stitch": False,
                         },
-                        "source_info": {
-                            "source": "PULL_FROM_URL",
-                            "video_url": video_url or "",
-                        },
+                        "source_info": source_info,
                     },
                 )
                 resp.raise_for_status()

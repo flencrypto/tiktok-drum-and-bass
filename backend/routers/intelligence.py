@@ -7,8 +7,9 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import date
+from typing import AsyncGenerator
 
-from fastapi import APIRouter, Form, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, status
 
 from backend.models import BriefingIngestResponse
 from backend.services.briefing_parser import GrokBriefingParser
@@ -17,7 +18,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/intelligence", tags=["intelligence"])
 
-_parser = GrokBriefingParser()
+
+async def get_parser() -> AsyncGenerator[GrokBriefingParser, None]:
+    """Dependency that provides a GrokBriefingParser and ensures it is closed after use."""
+    parser = GrokBriefingParser()
+    try:
+        yield parser
+    finally:
+        await parser.close()
 
 
 def _make_doc_id(briefing_text: str, briefing_date: str) -> str:
@@ -46,6 +54,7 @@ async def ingest_briefing(
         default="threads",
         description="Social platform for draft generation: 'threads' or 'x'",
     ),
+    parser: GrokBriefingParser = Depends(get_parser),
 ) -> BriefingIngestResponse:
     """
     Full pipeline:
@@ -70,7 +79,7 @@ async def ingest_briefing(
 
     # --- Step 1: Parse ---
     try:
-        extracted = await _parser.parse(briefing_text)
+        extracted = await parser.parse(briefing_text)
     except ValueError as exc:
         logger.error("Briefing parse error: %s", exc)
         raise HTTPException(
@@ -90,14 +99,14 @@ async def ingest_briefing(
 
     # --- Step 2: Upsert ---
     try:
-        await _parser.upsert_extracted_data(extracted, doc_id)
+        await parser.upsert_extracted_data(extracted, doc_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Upsert error for doc_id=%s: %s", doc_id, exc)
         # Non-fatal – continue pipeline
 
     # --- Step 3: Enrich with tenders ---
     try:
-        await _parser.enrich_with_tenders(extracted, briefing_date, doc_id)
+        await parser.enrich_with_tenders(extracted, briefing_date, doc_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Tender enrichment error for doc_id=%s: %s", doc_id, exc)
         # Non-fatal – continue pipeline
@@ -105,14 +114,14 @@ async def ingest_briefing(
     # --- Step 4: Touchpoints ---
     touchpoints = []
     try:
-        touchpoints = await _parser.generate_suggested_touchpoints(extracted)
+        touchpoints = await parser.generate_suggested_touchpoints(extracted)
     except Exception as exc:  # noqa: BLE001
         logger.error("Touchpoint generation error for doc_id=%s: %s", doc_id, exc)
 
     # --- Step 5: Social drafts ---
     social_drafts = []
     try:
-        social_drafts = await _parser.generate_social_drafts_from_touchpoints(
+        social_drafts = await parser.generate_social_drafts_from_touchpoints(
             touchpoints, platform=platform
         )
     except Exception as exc:  # noqa: BLE001
