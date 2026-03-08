@@ -456,9 +456,12 @@ class GrokBriefingParser:
             stage_advanced = opp_stage in ("Proposal", "Negotiation", "Won")
 
             # --- Workspace check 3: recent signal count (last 30 days) ---
+            # signal_count is fetched from the DB *after* upsert_extracted_data() has already
+            # persisted today's signals, so it already includes the current briefing.
+            # today_signals is kept only for the reason/context message.
             signal_count = await get_recent_signals_count(name, days=30)
             today_signals = signals_by_account.get(name, [])
-            total_signals = signal_count + len(today_signals)
+            total_signals = signal_count
 
             if total_signals == 0 and not stage_advanced:
                 logger.info("No signals or stage advancement for %s – skipping touchpoint", name)

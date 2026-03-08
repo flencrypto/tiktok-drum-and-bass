@@ -231,6 +231,7 @@ async def search_workspace_touchpoints(
                 and_(
                     TouchpointORM.account_name == account_name,
                     TouchpointORM.created_at >= cutoff,
+                    TouchpointORM.executed.is_(True),
                 )
             )
         )
